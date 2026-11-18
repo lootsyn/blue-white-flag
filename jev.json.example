@@ -1,0 +1,6 @@
+{
+  "_설명": "이 파일을 같은 위치에 jev.json 으로 복사한 뒤 값을 채우세요. (또는 환경변수 JEV_BASE_URL / JEV_API_KEY / JEV_MODEL 사용)",
+  "base_url": "https://api.example.com/v1",
+  "api_key": "여기에_발급받은_API_키_붙여넣기",
+  "model": "jev"
+}

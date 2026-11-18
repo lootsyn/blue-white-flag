@@ -1,0 +1,20 @@
+# 청기백기 휴머노이드 게임 — 의존성
+# MuJoCo 4 (물리 엔진)
+mujoco>=4.0.1
+
+# 수치 계산
+numpy>=2.0
+
+# jev(OpenAI 호환) 엔진 호출용
+requests>=2.31
+
+# 음성 입력 (--voice 모드 / 웹 음성은 브라우저 Web Speech API 사용)
+SpeechRecognition>=3.10
+sounddevice>=0.4.6
+
+# 웹 서버 모드 (web_server.py — 화면 스트리밍 + 텍스트/음성 명령)
+fastapi>=0.115
+uvicorn[standard]>=0.32
+
+# 프리뷰 렌더 (render_preview.py / test_headless.py의 이미지 저장)
+pillow>=10.0

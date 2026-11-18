@@ -1,0 +1,10 @@
+# API 키가 담긴 설정 파일 — 절대 커밋 금지
+jev.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 렌더 프리뷰
+preview/

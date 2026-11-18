@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🟦⬜ 청기백기 휴머노이드 — MuJoCo 4</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --dim: #8b949e;
+    --blue: #2f81f7; --white: #e6edf3; --accent: #f78166; --ok: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Pretendard", "Noto Sans KR", -apple-system, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+  }
+  header { text-align: center; padding: 18px 12px 6px; }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: 2px; }
+  header p { margin: 6px 0 0; color: var(--dim); font-size: 13px; }
+  .wrap { display: flex; gap: 14px; padding: 12px; width: min(1280px, 100%); flex-wrap: wrap; justify-content: center; }
+  .stage { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; flex: 1 1 560px; max-width: 720px; position: relative; }
+  .stage canvas { width: 100%; display: block; background: #000; }
+  .stage .off { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 14px; background: #0009; }
+  .side { flex: 1 1 320px; max-width: 460px; display: flex; flex-direction: column; gap: 10px; min-width: 300px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+  .card h2 { margin: 0 0 8px; font-size: 13px; color: var(--dim); font-weight: 600; letter-spacing: .5px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; color: var(--text); background: #1c2129; white-space: nowrap; }
+  .chip b { color: var(--ok); }
+  .chip .blue { color: #58a6ff; } .chip .white { color: #d0d7de; }
+  button {
+    font: inherit; border: 1px solid var(--border); background: #21262d; color: var(--text);
+    border-radius: 8px; padding: 8px 14px; cursor: pointer;
+  }
+  button:hover { background: #2d333b; }
+  button.voice-on { background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  .row { display: flex; gap: 8px; }
+  .row input[type=text] {
+    flex: 1; font: inherit; background: #0d1117; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  }
+  .live {
+    margin-top: 8px; min-height: 20px; font-size: 13.5px; color: #58a6ff;
+    border-left: 3px solid var(--blue); padding: 2px 8px; display: none;
+  }
+  .feed { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+  .feed .item { font-size: 12.8px; padding: 5px 8px; border-radius: 6px; background: #1c2129; border-left: 3px solid var(--border); word-break: keep-all; }
+  .feed .item .src { margin-right: 6px; }
+  .feed .item.deny { border-left-color: var(--accent); }
+  .feed .item.hold { border-left-color: var(--dim); }
+  .feed .item.act  { border-left-color: var(--ok); }
+  .hint { color: var(--dim); font-size: 12px; line-height: 1.55; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--dim); margin-right:4px; vertical-align: 1px;}
+  .dot.on { background: var(--ok); }
+  @media (max-width: 900px) { .wrap { flex-direction: column; align-items: stretch; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>🟦⬜ 청 기 백 기 · 휴머노이드</h1>
+  <p>MuJoCo 4 + jev (TypeSafe System One) — 말하는 즉시 반응합니다</p>
+</header>
+
+<div class="wrap">
+  <div class="stage">
+    <canvas id="video" width="960" height="540"></canvas>
+    <div class="off" id="off">화면 연결 중…</div>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h2>로봇 상태</h2>
+      <div class="chips" id="chips">
+        <span class="chip"><span class="dot" id="dot"></span>스트림</span>
+        <span class="chip">청기 <b id="blue">–</b></span>
+        <span class="chip">백기 <b id="white">–</b></span>
+        <span class="chip">기울기 <b id="tilt">–</b></span>
+        <span class="chip">서있음 <b id="health">–</b></span>
+        <span class="chip" id="engine">엔진 –</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🎙 음성 명령 (실시간 · 번복 환영)</h2>
+      <button id="voiceBtn" style="width:100%">🎤 음성 시작</button>
+      <div class="live" id="live"></div>
+      <p class="hint">말하는 <b>도중에도</b> 로봇이 반응합니다. 예: "청기 올려… 잠깐, 내려!"<br>
+      Chrome/Edge에서 동작 (마이크 권한 필요). 서버 주소가 localhost가 아니면 HTTPS가 필요할 수 있어요.</p>
+    </div>
+
+    <div class="card">
+      <h2>⌨️ 텍스트 명령</h2>
+      <form class="row" id="textForm">
+        <input type="text" id="textInput" placeholder="예: 청기 올려 / 백기 내리지 마 / 다 내려" autocomplete="off" maxlength="120">
+        <button type="submit">전송</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>📣 명령 기록</h2>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const video = $("video"), ctx = video.getContext("2d");
+const offEl = $("off");
+
+let ws = null, wsTimer = null, streamOn = false;
+let lastVoiceSent = "", sendTimer = null;
+
+// ---------------------------------------------------------------- WebSocket
+function connect() {
+  clearTimeout(wsTimer);
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => { $("dot").classList.add("on"); };
+  ws.onclose = () => {
+    streamOn = false; $("dot").classList.remove("on");
+    wsTimer = setTimeout(connect, 1500);
+  };
+  ws.onmessage = (e) => {
+    if (e.data instanceof ArrayBuffer) { drawFrame(e.data); return; }
+    const msg = JSON.parse(e.data);
+    if (msg.type === "state") onState(msg);
+    else if (msg.type === "parsed") onParsed(msg);
+    else if (msg.type === "hello") $("engine").textContent = `엔진 ${msg.engine}`;
+  };
+}
+connect();
+
+// ---------------------------------------------------------------- 화면 그리기
+let lastBlobUrl = null;
+async function drawFrame(buf) {
+  if (!streamOn) { streamOn = true; offEl.style.display = "none"; }
+  const blob = new Blob([buf], { type: "image/jpeg" });
+  const bmp = await createImageBitmap(blob);
+  if (video.width !== bmp.width) { video.width = bmp.width; video.height = bmp.height; }
+  ctx.drawImage(bmp, 0, 0);
+  bmp.close();
+}
+
+// ---------------------------------------------------------------- 상태
+function onState(s) {
+  $("blue").textContent = s.blue_up ? "올림 ↑" : "내림 ↓";
+  $("white").textContent = s.white_up ? "올림 ↑" : "내림 ↓";
+  $("tilt").textContent = (s.tilt >= 0 ? "+" : "") + s.tilt.toFixed(1) + "°";
+  $("health").textContent = s.health.toFixed(2);
+}
+
+// ---------------------------------------------------------------- 명령 기록
+const feedEl = $("feed");
+function addFeed(item) {
+  feedEl.prepend(item);
+  while (feedEl.children.length > 40) feedEl.lastChild.remove();
+}
+function feedItem(msg) {
+  const div = document.createElement("div");
+  div.className = "item " + msg.cls;
+  const src = { text: "⌨️", voice_final: "🎙", voice_interim: "🗣", system: "🤖" }[msg.source] || "📣";
+  div.innerHTML = `<span class="src">${src}</span>` +
+    `<b>${esc(msg.text)}</b> → ${esc(msg.reply)} <span style="color:var(--dim)">[${esc(msg.engine)}]</span>`;
+  return div;
+}
+function esc(s) { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; }
+
+function onParsed(msg) {
+  // applied:true → 로봇이 실제로 움직인/응답한 명령만 기록에 남김
+  if (msg.applied || msg.source !== "voice_interim") {
+    addFeed(feedItem({
+      cls: msg.unknown ? "deny" : (msg.applied ? "act" : "hold"),
+      source: msg.source, text: msg.text, reply: msg.reply, engine: msg.engine,
+    }));
+  }
+}
+
+// ---------------------------------------------------------------- 텍스트
+$("textForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("textInput");
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: "text", text }));
+  input.value = "";
+});
+
+// ---------------------------------------------------------------- 음성 (실시간 interim!)
+let rec = null, voiceOn = false;
+function toggleVoice() {
+  if (voiceOn) { stopVoice(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    alert("이 브라우저는 Web Speech API를 지원하지 않아요.\nChrome/Edge에서 실행하거나 텍스트 입력을 사용하세요.");
+    return;
+  }
+  rec = new SR();
+  rec.lang = "ko-KR";
+  rec.continuous = true;
+  rec.interimResults = true;   // ★ 말하는 도중의 중간 인식 결과를 즉시 사용
+
+  rec.onresult = (e) => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) {
+        const finalText = r[0].transcript.trim();
+        if (finalText) sendVoice(finalText, true);
+        lastVoiceSent = ""; // 확정 후엔 다시 중간 결과 전송 허용
+        $("live").style.display = "none";
+      } else {
+        interim += r[0].transcript;
+      }
+    }
+    if (interim) {
+      const liveEl = $("live");
+      liveEl.style.display = "block";
+      liveEl.textContent = "🗣 " + interim;
+      sendVoiceDebounced(interim);
+    }
+  };
+  rec.onerror = (e) => {
+    if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+      alert("마이크 권한이 필요해요. 주소창의 마이크 권한을 허용해 주세요.");
+      stopVoice();
+    }
+  };
+  rec.onend = () => { if (voiceOn) { try { rec.start(); } catch (_) {} } };
+
+  try { rec.start(); voiceOn = true; } catch (err) { alert("음성 시작 실패: " + err); return; }
+  updateVoiceBtn();
+}
+function stopVoice() {
+  voiceOn = false;
+  if (rec) { try { rec.stop(); } catch (_) {} rec = null; }
+  $("live").style.display = "none";
+  clearTimeout(sendTimer);
+  updateVoiceBtn();
+}
+function updateVoiceBtn() {
+  const btn = $("voiceBtn");
+  btn.textContent = voiceOn ? "⏹️ 음성 정지 (실시간 인식 중…)" : "🎤 음성 시작";
+  btn.classList.toggle("voice-on", voiceOn);
+}
+$("voiceBtn").addEventListener("click", toggleVoice);
+
+// 중간 결과는 살짝 모아서(120ms) 최신 것만 전송 — 번복 명령 즉시 반영
+function sendVoiceDebounced(text) {
+  const t = text.replace(/\s+/g, "");
+  if (!t || t === lastVoiceSent) return;
+  clearTimeout(sendTimer);
+  sendTimer = setTimeout(() => {
+    if (t === lastVoiceSent) return;
+    lastVoiceSent = t;
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "voice", text, final: false }));
+  }, 120);
+}
+function sendVoice(text, final) {
+  const t = text.replace(/\s+/g, "");
+  if (!t || !ws || ws.readyState !== 1) return;
+  if (!final && t === lastVoiceSent) return;
+  lastVoiceSent = t;
+  ws.send(JSON.stringify({ type: "voice", text, final: !!final }));
+}
+</script>
+</body>
+</html>
