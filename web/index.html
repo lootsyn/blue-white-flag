@@ -11,42 +11,56 @@
     --blue: #2f81f7; --white: #e6edf3; --accent: #f78166; --ok: #3fb950;
   }
   * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font-family: "Pretendard", "Noto Sans KR", -apple-system, "Segoe UI", sans-serif;
-    display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; min-height: 100dvh;
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
-  header { text-align: center; padding: 18px 12px 6px; }
-  header h1 { margin: 0; font-size: 22px; letter-spacing: 2px; }
-  header p { margin: 6px 0 0; color: var(--dim); font-size: 13px; }
-  .wrap { display: flex; gap: 14px; padding: 12px; width: min(1280px, 100%); flex-wrap: wrap; justify-content: center; }
-  .stage { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; flex: 1 1 560px; max-width: 720px; position: relative; }
-  .stage canvas { width: 100%; display: block; background: #000; }
-  .stage .off { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 14px; background: #0009; }
-  .side { flex: 1 1 320px; max-width: 460px; display: flex; flex-direction: column; gap: 10px; min-width: 300px; }
+  header { text-align: center; padding: 14px 12px 4px; padding-top: max(14px, env(safe-area-inset-top, 0px)); }
+  header h1 { margin: 0; font-size: clamp(17px, 2.6vw, 22px); letter-spacing: 2px; }
+  header p { margin: 6px 0 0; color: var(--dim); font-size: 12.5px; }
+  .wrap { display: flex; gap: 14px; padding: 12px; width: min(1280px, 100%);
+          justify-content: center; align-items: flex-start; flex-wrap: wrap; }
+
+  /* 화면: 16:9 박스 + canvas는 object-fit (모바일/가로 모드에서도 찌그러지지 않음) */
+  .stage { background: #000; border: 1px solid var(--border); border-radius: 12px;
+           overflow: hidden; position: relative; width: 100%;
+           aspect-ratio: 16 / 9; flex: 1 1 560px; max-width: 720px; }
+  .stage canvas { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .stage .off { position: absolute; inset: 0; display: flex; align-items: center;
+                justify-content: center; color: var(--dim); font-size: 14px; background: #0009; }
+
+  .side { flex: 1 1 320px; max-width: 460px; display: flex; flex-direction: column; gap: 10px; }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
   .card h2 { margin: 0 0 8px; font-size: 13px; color: var(--dim); font-weight: 600; letter-spacing: .5px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; color: var(--text); background: #1c2129; white-space: nowrap; }
+  .chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px;
+          font-size: 12.5px; color: var(--text); background: #1c2129; white-space: nowrap; }
   .chip b { color: var(--ok); }
-  .chip .blue { color: #58a6ff; } .chip .white { color: #d0d7de; }
   button {
-    font: inherit; border: 1px solid var(--border); background: #21262d; color: var(--text);
-    border-radius: 8px; padding: 8px 14px; cursor: pointer;
+    font: inherit; font-size: 16px; border: 1px solid var(--border); background: #21262d;
+    color: var(--text); border-radius: 8px; padding: 10px 14px; cursor: pointer;
+    touch-action: manipulation;
   }
   button:hover { background: #2d333b; }
   button.voice-on { background: var(--accent); border-color: var(--accent); font-weight: 700; }
   .row { display: flex; gap: 8px; }
   .row input[type=text] {
-    flex: 1; font: inherit; background: #0d1117; color: var(--text);
-    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+    flex: 1; font: inherit; font-size: 16px; background: #0d1117; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0;
   }
   .live {
     margin-top: 8px; min-height: 20px; font-size: 13.5px; color: #58a6ff;
     border-left: 3px solid var(--blue); padding: 2px 8px; display: none;
   }
   .feed { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
-  .feed .item { font-size: 12.8px; padding: 5px 8px; border-radius: 6px; background: #1c2129; border-left: 3px solid var(--border); word-break: keep-all; }
+  .feed .item { font-size: 12.8px; padding: 5px 8px; border-radius: 6px; background: #1c2129;
+                border-left: 3px solid var(--border); word-break: keep-all; }
   .feed .item .src { margin-right: 6px; }
   .feed .item.deny { border-left-color: var(--accent); }
   .feed .item.hold { border-left-color: var(--dim); }
@@ -54,13 +68,27 @@
   .hint { color: var(--dim); font-size: 12px; line-height: 1.55; }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--dim); margin-right:4px; vertical-align: 1px;}
   .dot.on { background: var(--ok); }
-  @media (max-width: 900px) { .wrap { flex-direction: column; align-items: stretch; } }
+
+  /* 모바일: 세로 스택 — flex-basis가 세로축에 적용되는 문제를 제거하고
+     화면(16:9, 최대 높이 제한) 위 → 컨트롤 아래 구도로 고정 */
+  @media (max-width: 900px) {
+    .wrap { flex-direction: column; align-items: stretch; }
+    .stage { flex: none; max-width: none; max-height: 46vh; }
+    .side { flex: none; max-width: none; min-width: 0; }
+    .feed { max-height: 220px; }
+    header h1 { letter-spacing: 1px; }
+  }
+  @media (max-width: 420px) {
+    .chips { gap: 4px; }
+    .chip { font-size: 12px; padding: 4px 8px; }
+    .card { padding: 10px 12px; }
+  }
 </style>
 </head>
 <body>
 <header>
   <h1>🟦⬜ 청 기 백 기 · 휴머노이드</h1>
-  <p>MuJoCo 4 + jev (TypeSafe System One) — 말하는 즉시 반응합니다</p>
+  <p>음성 인식은 <b>브라우저</b>가 · 명령 해석은 <b>jev</b>가 · 동작은 <b>MuJoCo 4</b>가</p>
 </header>
 
 <div class="wrap">
@@ -88,7 +116,8 @@
       <div class="live" id="live"></div>
       <p class="hint">말하는 <b>도중에도</b> 로봇이 반응합니다. 예: "청기 올려… 잠깐, 내려!"<br>
       규칙: <b>올려</b>는 올렸다가 자동으로 내려와요. <b>내려</b>는 올라가는 도중에 즉시 번복!<br>
-      Chrome/Edge에서 동작 (마이크 권한 필요). 서버 주소가 localhost가 아니면 HTTPS가 필요할 수 있어요.</p>
+      음성 인식: 브라우저 Web Speech API (Chrome/Edge/Android). 마이크는 HTTPS 또는 localhost에서만 허용돼요 —
+      모바일에서는 서버를 <code>--https</code>로 띄우고 경고를 수락하면 마이크가 풀립니다.</p>
     </div>
 
     <div class="card">
@@ -131,7 +160,7 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === "state") onState(msg);
     else if (msg.type === "parsed") onParsed(msg);
-    else if (msg.type === "hello") $("engine").textContent = `엔진 ${msg.engine}`;
+    else if (msg.type === "hello") $("engine").textContent = `명령 파서 ${msg.engine}`;
   };
 }
 connect();

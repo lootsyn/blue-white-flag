@@ -46,15 +46,35 @@ python3 -m venv .venv
   "청기 올려… 잠깐, 내려!"라고 말하면 "올려"가 반영된 로봇이 **현재 동작을 즉시 갈아타고** 내립니다.
   이미 같은 동작 중이면 서버가 의미적 중복(dedup)을 걸러 재실행하지 않습니다.
 
-### 원격 서버에서 접속 (SSH 터널)
+### 누가 무엇을 하나 (혼동 주의)
+
+| 단계 | 담당 |
+| --- | --- |
+| 🎙 말 → 글자 (STT) | **브라우저** Web Speech API (Chrome/Edge/Android Chrome. iOS Safari는 지원 불안정) |
+| 🧠 글자 → 동작 (명령 해석) | **jev** (TypeSafe System One, `api.typesafe.ai/v1/systemone`) |
+| 🤖 동작 수행 | **MuJoCo 4** 물리 시뮬레이션 (이 서버) |
+
+→ 음성 "인식"은 jev가 아니라 브라우저가 합니다. jev는 인식된 **문장을 해석**하는 역할이에요.
+
+### 모바일에서 접속
+
+- 화면/텍스트 명령: 그냥 접속하면 됩니다 (반응형 레이아웃 — 화면 위, 컨트롤 아래)
+- **모바일 음성은 HTTPS가 필수**: 브라우저 정책상 `http://IP` 주소에서는 마이크가 차단됩니다.
 
 ```bash
-ssh -L 8000:localhost:8000 user@서버    # 이후 로컬 브라우저에서 http://localhost:8000
+.venv/bin/python web_server.py --https --port 8000
+# 모바일에서 https://148.251.245.209:8000 접속 →
+# 인증서 경고 → '고급 → 안전하지 않음으로 진행' → 🎤 마이크 허용
+```
+`--https`는 자체 서명 인증서를 `.certs/`에 자동 생성합니다 (gitignore 됨).
+
+### 원격 PC에서 접속 (SSH 터널)
+
+```bash
+ssh -L 8000:localhost:8000 herdr@148.251.245.209    # 이후 로컬 브라우저에서 http://localhost:8000
 ```
 
-> 음성 인식은 브라우저에서 수행되므로, 터널로 `localhost`에 접속하면 Web Speech API
-> 권한 문제 없이 사용할 수 있습니다 (HTTPS가 아닌 직접 IP 접속은 브라우저 정책상
-> 마이크가 차단될 수 있어요).
+> 터널로 `localhost`에 접속하면 Web Speech API 마이크 권한 문제 없이 음성을 쓸 수 있습니다.
 
 ### 웹 통합 테스트
 
@@ -194,6 +214,8 @@ export JEV_MODEL="jev-latest"                    # (기본값)
 
 | 증상 | 해결 |
 | --- | --- |
+| 모바일에서 마이크가 안 돼요 | `--https`로 실행 후 인증서 경고 수락 → 마이크 허용 (http://IP에선 브라우저가 마이크 차단) |
+| iOS에서 음성이 불안해요 | iOS Safari의 Web Speech API 지원이 불완전 — 텍스트 입력 사용 권장 |
 | 웹 화면이 안 나와요 (뷰어만) | 서버에 GL이 없으면 명령은 동작. `MUJOCO_GL=osmesa` 시도 또는 EGL 설치 |
 | 웹 음성 버튼이 안 돼요 | Chrome/Edge 사용, 마이크 권한 허용. HTTPS가 아니면 `localhost` 또는 SSH 터널로 접속 |
 | 웹 화면이 버벅여요 | `--fps 15 --width 800 --height 450` 로 낮추기 (소프트웨어 GL 환경) |

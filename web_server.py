@@ -356,22 +356,49 @@ def main() -> int:
     ap.add_argument("--quality", type=int, default=68)
     ap.add_argument("--engine", choices=["auto", "jev", "opencode", "offline"], default="auto")
     ap.add_argument("--model", default=None)
+    ap.add_argument("--https", action="store_true",
+                    help="자체 서명 인증서로 HTTPS 실행 — 모바일 브라우저 마이크 허용용 "
+                         "(일반 http://IP 로 접속하면 모바일 마이크가 차단됨)")
     args = ap.parse_args()
 
     global game
     game = GameServer(args)
     game.start()
 
+    scheme = "https" if args.https else "http"
     print()
     print("🟦⬜ 청기백기 웹 서버")
     print(f"   파서 엔진: {game.parser.describe()}")
-    print(f"   로컬:    http://localhost:{args.port}")
-    print(f"   원격:    http://<서버주소>:{args.port}  (또는 SSH 터널: ssh -L {args.port}:localhost:{args.port} 서버)")
-    print("   음성 인식은 '브라우저'에서 수행됩니다 (Chrome/Edge, Web Speech API ko-KR).")
+    print(f"   로컬:    {scheme}://localhost:{args.port}")
+    print(f"   원격:    {scheme}://<서버주소>:{args.port}  (또는 SSH 터널: ssh -L {args.port}:localhost:{args.port} 서버)")
+    if args.https:
+        print("   ⚠️ 자체 서명 인증서 — 브라우저 경고 화면에서 '고급 → 계속'을 눌러 진입하세요.")
+        print("      모바일에서 마이크 권한이 허용되려면 HTTPS가 반드시 필요합니다.")
+    else:
+        print("   음성 인식은 '브라우저'에서 수행됩니다 (Chrome/Edge, Web Speech API ko-KR).")
+        print("   모바일 직접 접속 + 음성을 원하면 --https 로 실행하세요.")
     print()
 
     import uvicorn
-    config = uvicorn.Config(app, host=args.host, port=args.port, log_level="warning")
+    ssl_kwargs = {}
+    if args.https:
+        cert_dir = os.path.join(HERE, ".certs")
+        os.makedirs(cert_dir, exist_ok=True)
+        cert_path = os.path.join(cert_dir, "cert.pem")
+        key_path = os.path.join(cert_dir, "key.pem")
+        if not (os.path.exists(cert_path) and os.path.exists(key_path)):
+            import subprocess
+            subprocess.run(
+                ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                 "-keyout", key_path, "-out", cert_path, "-days", "3650",
+                 "-subj", "/CN=flag-game"],
+                check=True, capture_output=True,
+            )
+            print(f"   자체 서명 인증서 생성: {cert_path}")
+        ssl_kwargs = {"ssl_certfile": cert_path, "ssl_keyfile": key_path}
+
+    config = uvicorn.Config(app, host=args.host, port=args.port,
+                            log_level="warning", **ssl_kwargs)
     server = uvicorn.Server(config)
 
     async def serve():
