@@ -87,6 +87,7 @@
       <button id="voiceBtn" style="width:100%">🎤 음성 시작</button>
       <div class="live" id="live"></div>
       <p class="hint">말하는 <b>도중에도</b> 로봇이 반응합니다. 예: "청기 올려… 잠깐, 내려!"<br>
+      규칙: <b>올려</b>는 올렸다가 자동으로 내려와요. <b>내려</b>는 올라가는 도중에 즉시 번복!<br>
       Chrome/Edge에서 동작 (마이크 권한 필요). 서버 주소가 localhost가 아니면 HTTPS가 필요할 수 있어요.</p>
     </div>
 
@@ -148,10 +149,16 @@ async function drawFrame(buf) {
 
 // ---------------------------------------------------------------- 상태
 function onState(s) {
-  $("blue").textContent = s.blue_up ? "올림 ↑" : "내림 ↓";
-  $("white").textContent = s.white_up ? "올림 ↑" : "내림 ↓";
+  $("blue").textContent = chipText(s.blue_up, s.blue_phase);
+  $("white").textContent = chipText(s.white_up, s.white_phase);
   $("tilt").textContent = (s.tilt >= 0 ? "+" : "") + s.tilt.toFixed(1) + "°";
   $("health").textContent = s.health.toFixed(2);
+}
+function chipText(up, phase) {
+  if (phase === "frozen") return "정지 🧊";
+  if (phase === "up" || phase === "uphold") return "올림 ↑";
+  if (phase === "down") return "내림 ↓";
+  return up ? "올림 ↑" : "내림 ↓";
 }
 
 // ---------------------------------------------------------------- 명령 기록

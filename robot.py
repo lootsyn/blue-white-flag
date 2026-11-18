@@ -40,6 +40,7 @@ T_FOLD_UP = 0.16    # 올릴 때: 팔꿈치 접기
 T_SWING_UP = 0.32   # 올릴 때: 어깨 스윙
 T_SWING_DOWN = 0.32 # 내릴 때: 어깨 스윙
 T_FOLD_DOWN = 0.16  # 내릴 때: 팔꿈치 펴기
+T_HOLD_TOP = 0.80   # 정점 유지 — 기본 동작: 올렸다가 잠깐 멈췄다 자동으로 내려온다
 
 # 자세 트림 게인 (너무 세면 발목이 '펄럭' 불안정 → 낮게 유지)
 TRIM_KP = 0.50
@@ -61,12 +62,21 @@ def min_jerk(u: float) -> float:
 class _Segment:
     """한 관절 그룹의 궤적 구간. 시작값은 실행 시점의 현재 ctrl에서 캡처."""
 
-    __slots__ = ("targets", "duration", "elapsed")
+    __slots__ = ("targets", "duration", "elapsed", "phase")
 
-    def __init__(self, targets: dict, duration: float):
+    def __init__(self, targets: dict, duration: float, phase: str | None = None):
         self.targets = targets          # {actuator 이름(접미사): 목표값}
         self.duration = duration
         self.elapsed = 0.0
+        self.phase = phase              # 구간 시작 시 설정할 팔 동작 단계
+
+
+# 팔 동작 단계(phase): 게임 규칙과 중복 명령 판정의 기준
+#   idle    : 기본(내려간) 대기
+#   up      : 올라가는 중
+#   uphold  : 정점 유지 중 (자동 복귀 대기)
+#   down    : 내려가는 중 (번복/자동 복귀 포함)
+#   frozen  : '올리지 마'로 그 자리에 얼어붙음
 
 
 class FlagRobot:
@@ -96,6 +106,7 @@ class FlagRobot:
         # 팔별 궤적 큐 (명령 중복 시 덮어씀 → 반응성 좋음)
         self._queues = {"r": deque(), "l": deque()}
         self._active = {"r": (None, None), "l": (None, None)}  # (segment, {이름: 시작값})
+        self._phase = {"r": "idle", "l": "idle"}                # 팔 동작 단계
 
         # 자세 트림 상태
         self._trim_state = [0.0, 0.0]
@@ -164,6 +175,8 @@ class FlagRobot:
                     seg = self._queues[s].popleft()
                     starts = {n: self._get_ctrl(f"{s}_{n}") for n in seg.targets}
                     self._active[s] = (seg, starts)
+                    if seg.phase is not None:
+                        self._phase[s] = seg.phase
                 else:
                     continue
             seg.elapsed += dt
@@ -176,6 +189,8 @@ class FlagRobot:
                 for name, target in seg.targets.items():
                     self._set_ctrl(f"{s}_{name}", target)
                 self._active[s] = (None, None)
+                if not self._queues[s]:
+                    self._phase[s] = "idle"
 
     def busy(self) -> float:
         """남은 동작 시간 (초). 0이면 새 명령 즉시 가능."""
@@ -191,32 +206,90 @@ class FlagRobot:
     def command(self, flag: str, direction: str) -> str:
         """flag: 'blue'|'white'|'both'|'none', direction: 'up'|'down'|'hold'.
 
+        게임 규칙 — 기본 동작은 '올렸다가 다시 내리는 것'까지:
+          - 'up'   : 올리고 → 짧게 유지(T_HOLD_TOP) → 자동으로 내려온다 (게스처)
+          - 'down' : 지금 위치에서 즉시 내린다 (번복 명령). 이미 내려가 있으면 무시
+          - 'hold' : 그 자리에서 얼어붙기 ('올리지 마')
+        이미 같은 동작을 하고 있는 팔은 건너뛴다 (중복 명령/스팸 방지).
+
         반환: 수행 멘트 (한국어).
         """
         if flag not in FLAG_TO_SIDE:
             flag = "none"
+        if direction == "hold":
+            return self.freeze(flag)
+
         sides = FLAG_TO_SIDE[flag]
         if isinstance(sides, str):
             sides = (sides,)
-        if not sides or direction == "hold":
+        if not sides or direction not in ("up", "down"):
             return f"{FLAG_KR[flag]} 안 움직여요!"
 
-        if direction == "up":
-            segs = [
-                _Segment({"elbow": POSE_FOLD["elbow"], "shoulder_roll": POSE_FOLD["shoulder_roll"]}, T_FOLD_UP),
-                _Segment({"shoulder_pitch": POSE_UP["shoulder_pitch"], "elbow": POSE_UP["elbow"]}, T_SWING_UP),
-            ]
-        elif direction == "down":
-            segs = [
-                _Segment({"shoulder_pitch": POSE_READY["shoulder_pitch"], "elbow": POSE_FOLD["elbow"]}, T_SWING_DOWN),
-                _Segment({"elbow": POSE_READY["elbow"], "shoulder_roll": POSE_READY["shoulder_roll"]}, T_FOLD_DOWN),
-            ]
-        else:
-            return f"알 수 없는 동작이에요: {direction}"
+        acted = []
+        for s in sides:
+            phase = self._phase[s]
+            if direction == "up":
+                if phase in ("up", "uphold"):
+                    continue  # 이미 올라가는 중 / 올려져 있음
+                segs = [
+                    _Segment({"elbow": POSE_FOLD["elbow"],
+                              "shoulder_roll": POSE_FOLD["shoulder_roll"]}, T_FOLD_UP, phase="up"),
+                    _Segment({"shoulder_pitch": POSE_UP["shoulder_pitch"],
+                              "elbow": POSE_UP["elbow"]}, T_SWING_UP, phase="up"),
+                    _Segment({}, T_HOLD_TOP, phase="uphold"),  # 정점 유지 (ctrl 그대로)
+                    _Segment({"shoulder_pitch": POSE_READY["shoulder_pitch"],
+                              "elbow": POSE_FOLD["elbow"]}, T_SWING_DOWN, phase="down"),
+                    _Segment({"elbow": POSE_READY["elbow"],
+                              "shoulder_roll": POSE_READY["shoulder_roll"]}, T_FOLD_DOWN, phase="down"),
+                ]
+            else:  # down: 번복 — 지금 위치에서 바로 내린다
+                if phase in ("down", "idle"):
+                    continue  # 이미 내려가는 중 / 내려가 있음
+                segs = [
+                    _Segment({"shoulder_pitch": POSE_READY["shoulder_pitch"],
+                              "elbow": POSE_FOLD["elbow"]}, T_SWING_DOWN, phase="down"),
+                    _Segment({"elbow": POSE_READY["elbow"],
+                              "shoulder_roll": POSE_READY["shoulder_roll"]}, T_FOLD_DOWN, phase="down"),
+                ]
+            self._push_segments((s,), segs)
+            self._phase[s] = direction if direction == "down" else "up"
+            acted.append(s)
 
-        self._push_segments(sides, segs)
+        if not acted:
+            state = "올라 있어요!" if direction == "up" else "내려가 있어요!"
+            return f"{FLAG_KR[flag]} 이미 {state}"
         verb = "올려!" if direction == "up" else "내려!"
         return f"{FLAG_KR[flag]} {verb}"
+
+    def freeze(self, flag: str = "both") -> str:
+        """'올리지 마' / '가만히' — 현재 자리에서 정지.
+
+        남은 궤적을 제거하고 ctrl은 마지막 값을 유지 → 서보가 그 자세를 지탱한다.
+        동작 중이라면 그 순간에 멈춘다 (진행자에게 딱 걸린 모습!).
+        """
+        sides = FLAG_TO_SIDE.get(flag, ())
+        if isinstance(sides, str):
+            sides = (sides,)
+        if not sides:
+            sides = ("r", "l")
+        for s in sides:
+            self._queues[s].clear()
+            self._active[s] = (None, None)
+            # 서보는 ctrl이 실제 각도보다 앞서 있음(궤적 리드). 리드의 30%만 남기면
+            # 거의 그 자리에서 즉시 멈추고, 남은 오차만큼의 서보 토크로 자세를 지탱한다.
+            for name in ("shoulder_pitch", "shoulder_roll", "elbow"):
+                idx = self._act.get(f"{s}_{name}")
+                jadr = self._jadr.get(f"{s}_{name}")
+                if idx is None or jadr is None:
+                    continue
+                lead = float(self.data.ctrl[idx]) - float(self.data.qpos[jadr])
+                self.data.ctrl[idx] = float(self.data.qpos[jadr]) + 0.3 * lead
+            self._phase[s] = "frozen"
+        return f"{FLAG_KR.get(flag, '')} 안 움직여요!".strip()
+
+    def arm_phases(self) -> dict:
+        """팔별 동작 단계 스냅샷 (웹 서버의 중복 명령 판정용)."""
+        return dict(self._phase)
 
     def deny(self) -> str:
         """알아들을 수 없는 명령 → 어깨 으쓱+팔꿈치 펄럭 거부 동작."""
@@ -228,14 +301,8 @@ class FlagRobot:
         return "무슨 말인지 모르겠어요!"
 
     def salute(self) -> str:
-        """게임 시작 인사: 양깃발 들었다 내리기."""
-        up = self.command("both", "up")
-        for s in ("r", "l"):
-            self._queues[s].extend([
-                _Segment({"shoulder_pitch": POSE_READY["shoulder_pitch"], "elbow": POSE_FOLD["elbow"]}, T_SWING_DOWN),
-                _Segment({"elbow": POSE_READY["elbow"], "shoulder_roll": POSE_READY["shoulder_roll"]}, T_FOLD_DOWN),
-            ])
-        return "게임 시작! " + up
+        """게임 시작 인사: 양깃발 올렸다가 자동으로 내리기 (기본 게스처)."""
+        return "게임 시작! " + self.command("both", "up")
 
     # ---------------------------------------------------------- 상태/유틸
     def flag_heights(self) -> dict:

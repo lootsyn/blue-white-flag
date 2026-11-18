@@ -25,10 +25,10 @@ def main() -> int:
     renderer = mujoco.Renderer(robot.model, height=900, width=1200)
     cam = mujoco.MjvCamera()
     mujoco.mjv_defaultFreeCamera(robot.model, cam)
-    cam.lookat[:] = [0.0, 0.0, 1.05]
-    cam.distance = 4.4
-    cam.azimuth = 78
-    cam.elevation = 5
+    cam.lookat[:] = [0.0, 0.0, 1.45]   # 상반신 + 든 깃발 클로즈업
+    cam.distance = 3.2
+    cam.azimuth = 18
+    cam.elevation = 3
 
     from PIL import Image
 

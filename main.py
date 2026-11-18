@@ -60,17 +60,23 @@ def format_state(robot: FlagRobot) -> str:
 
 
 def execute(robot: FlagRobot, parsed: dict) -> None:
-    """파싱된 명령을 로봇에 적용."""
+    """파싱된 명령을 로봇에 적용.
+
+    게임 규칙: '올려'는 올렸다가 자동으로 내려오는 게스처, '내려'는 즉시 번복,
+    '가만히/올리지 마'는 현재 자리에서 얼어붙기.
+    """
     if parsed.get("unknown") and not parsed.get("actions"):
         robot.deny()
         return
     if not parsed.get("actions"):
-        # 가만히 명령 ("손 대지 마", "가만히" 등) — 워커가 이미 멘트를 출력했으므로 동작 없음
+        # 가만히 명령 ("손 대지 마", "가만히" 등) — 그 자리에서 정지
+        robot.freeze("both")
         return
     for action in parsed["actions"]:
         if action["dir"] in ("up", "down"):
             robot.command(action["flag"], action["dir"])
-        # hold → 아무것도 안 함
+        elif action["dir"] == "hold":
+            robot.freeze(action["flag"])
 
 
 # ----------------------------------------------------------------------------
@@ -145,12 +151,12 @@ def run_viewer(robot: FlagRobot, cmd_q: queue.Queue, done_event: threading.Event
     import mujoco.viewer
 
     with mujoco.viewer.launch_passive(robot.model, robot.data) as viewer:
-        # 초기 카메라 (마우스로 자유롭게 조작 가능)
+        # 초기 카메라: 상반신 + 든 깃발 클로즈업 (마우스로 자유롭게 조작 가능)
         cam = viewer.cam
-        cam.lookat[:] = [0.0, 0.0, 1.05]
-        cam.distance = 4.4
-        cam.azimuth = 32
-        cam.elevation = 6
+        cam.lookat[:] = [0.0, 0.0, 1.45]
+        cam.distance = 3.2
+        cam.azimuth = 18
+        cam.elevation = 3
 
         print("\n뷰어 실행 중! (마우스 드래그=회전, 휠=줌)\n")
         robot.settle(2.0)

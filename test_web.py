@@ -97,7 +97,7 @@ async def run_ws_tests() -> bool:
         ok_stream = fps >= 8  # llvmpipe 소프트웨어 GL 고려 낮은 기준
         print(f"   스트림: {'PASS' if ok_stream else 'FAIL'}")
 
-        print("=== 4. 텍스트 명령: 청기 올려 ===")
+        print("=== 4. 텍스트 명령: 청기 올려 (게스처: 올림→자동 복귀) ===")
         await send_text("청기 올려")
         ev = await wait_parsed(lambda d: d["applied"])
         print(f"   파싱: reply={ev['reply']!r} engine={ev['engine']}")
@@ -105,6 +105,12 @@ async def run_ws_tests() -> bool:
         print(f"   🟦 올림 반영!  tilt={st['tilt']:+.1f}° health={st['health']}")
         results["blue_up"] = st["blue_up"]
         print("   명령 반영: PASS" if st["blue_up"] else "   명령 반영: FAIL")
+        t0 = time.monotonic()
+        st2 = await wait_state(lambda d: d["blue_up"] is False, timeout=6.0)
+        dt = time.monotonic() - t0
+        print(f"   기본 동작 완료: {dt:.1f}s 만에 자동으로 내려옴 (phase={st2.get('blue_phase')})")
+        results["gesture_return"] = st2["blue_up"] is False
+        print("   올렸다→자동 내림: PASS" if results["gesture_return"] else "   자동 복귀: FAIL")
 
         print("=== 5. 급격한 번복: 내려 → 0.25s → 올려 ===")
         await send_text("청기 내려")
@@ -146,8 +152,8 @@ async def run_ws_tests() -> bool:
 
         read_task.cancel()
 
-    passed = (ok_stream and results.get("blue_up") and results.get("reversal_ok")
-              and results.get("deny") and results.get("voice_flow"))
+    passed = (ok_stream and results.get("blue_up") and results.get("gesture_return")
+              and results.get("reversal_ok") and results.get("deny") and results.get("voice_flow"))
     print("\n" + ("🎉 웹 통합 PASS" if passed else "❌ 웹 통합 FAIL"))
     return bool(passed)
 

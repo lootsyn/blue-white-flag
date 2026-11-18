@@ -36,17 +36,11 @@ from PIL import Image  # noqa: E402
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 
-from robot import FlagRobot  # noqa: E402
+from robot import FlagRobot, FLAG_TO_SIDE  # noqa: E402
 from parser import CommandParser  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(HERE, "web")
-
-
-def _actions_key(parsed: dict) -> tuple:
-    """명령의 의미적 키 — 같은 동작이 반복되면 재실행하지 않는다 (번복 감지용)."""
-    actions = parsed.get("actions") or []
-    return tuple(sorted((a["flag"], a["dir"]) for a in actions))
 
 
 class GameServer:
@@ -72,7 +66,6 @@ class GameServer:
 
         # 명령 (스레드 간)
         self.cmd_queue: queue.Queue = queue.Queue()
-        self.last_key: tuple | None = None
         self.running = True
         self._thread: threading.Thread | None = None
 
@@ -87,6 +80,33 @@ class GameServer:
             self._thread.join(timeout=3.0)
 
     # ------------------------------------------------------------- 명령 처리
+    def _would_apply(self, actions: list) -> bool:
+        """로봇 팔 단계(phase) 기준으로 이 명령이 실제로 움직일지 판정.
+
+        게임 규칙: '올려'는 게스처(올림→유지→자동 복귀), '내려'는 번복, 'hold'는 정지.
+        - 이미 올라가는 중/올려져 있으면 또 다른 '올려'는 무시
+        - 이미 내려가는 중/내려가 있으면 또 다른 '내려'는 무시
+        → 같은 명령 반복 스팸은 잡아주고, 진짜 번복(↑↔↓)은 즉시 통과!
+        """
+        phases = self.robot.arm_phases()
+        for action in actions:
+            d = action.get("dir")
+            sides = FLAG_TO_SIDE.get(action.get("flag"), ())
+            if isinstance(sides, str):
+                sides = (sides,)
+            if d in ("up", "down"):
+                for s in sides:
+                    ph = phases.get(s, "idle")
+                    if d == "up" and ph not in ("up", "uphold"):
+                        return True
+                    if d == "down" and ph not in ("down", "idle"):
+                        return True
+            elif d == "hold":
+                for s in (sides or ("r", "l")):
+                    if phases.get(s) != "frozen":
+                        return True
+        return False
+
     def handle_command(self, text: str, source: str) -> dict:
         """WS 핸들러에서 스레드풀로 실행 (jev 네트워크 호출 포함).
 
@@ -94,22 +114,21 @@ class GameServer:
         """
         parsed = self.parser.parse(text)
         unknown = bool(parsed.get("unknown")) and not parsed.get("actions")
-        key = _actions_key(parsed)
-        applied = False
+        actions = parsed.get("actions") or []
 
         if unknown and source == "voice_interim":
-            pass  # 말이 아직 덜 끝난 상태의 잡음 — 로봇을 흔들게 하지 않음
+            applied = False  # 말이 아직 덜 끝난 상태의 잡음 — 로봇을 흔들게 하지 않음
         elif unknown:
             self.cmd_queue.put(("deny", None))
             applied = True
-        elif not parsed.get("actions"):
-            pass  # "가만히" — 로봇 정지, 멘트만 전달
-        elif key == self.last_key:
-            pass  # 직전과 같은 동작 — 재실행 방지 (스팸/반복 억제)
-        else:
-            self.cmd_queue.put(("cmd", parsed))
-            self.last_key = key
+        elif not actions:
+            self.cmd_queue.put(("freeze", None))   # 가만히 / 손 대지 마 → 그 자리 정지
             applied = True
+        elif self._would_apply(actions):
+            self.cmd_queue.put(("cmd", parsed))
+            applied = True
+        else:
+            applied = False  # 이미 하고 있는 동작 — 중복 무시
 
         return {
             "type": "parsed",
@@ -172,10 +191,11 @@ class GameServer:
         renderer = None
         camera = mujoco.MjvCamera()
         mujoco.mjv_defaultFreeCamera(robot.model, camera)
-        camera.lookat[:] = [0.0, 0.0, 1.05]
-        camera.distance = 4.4
-        camera.azimuth = 32
-        camera.elevation = 6
+        # 상반신 + 든 깃발 클로즈업 (펄럭이는 천까지 여유 있게)
+        camera.lookat[:] = [0.0, 0.0, 1.45]
+        camera.distance = 3.2
+        camera.azimuth = 18
+        camera.elevation = 3
         try:
             renderer = mujoco.Renderer(robot.model, height=self.height, width=self.width)
         except Exception as e:
@@ -201,8 +221,12 @@ class GameServer:
                     for action in payload["actions"]:
                         if action["dir"] in ("up", "down"):
                             robot.command(action["flag"], action["dir"])
+                        elif action["dir"] == "hold":
+                            robot.freeze(action["flag"])
                 elif kind == "deny":
                     robot.deny()
+                elif kind == "freeze":
+                    robot.freeze("both")
 
             # 2) 물리 catch-up (실시간, 지연 누적 방지 캡 100ms)
             target = int((now - t0) / dt)
@@ -221,10 +245,13 @@ class GameServer:
                     with self.lock:
                         self.latest_frame = buf.getvalue()
                         up = robot.flags_up()
+                        phases = robot.arm_phases()
                         phi, _psi = robot.pelvis_tilt_deg
                         self.state = {
                             "blue_up": up["blue"],
                             "white_up": up["white"],
+                            "blue_phase": phases["r"],
+                            "white_phase": phases["l"],
                             "tilt": round(phi, 2),
                             "health": robot.standing_health(),
                             "fps": round(len(frame_times) / 3.0, 1),

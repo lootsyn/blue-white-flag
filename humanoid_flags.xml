@@ -58,8 +58,8 @@
     <geom name="floor" type="plane" size="8 8 0.1" material="floor_mat"/>
     <geom name="stage" type="cylinder" size="1.7 0.02" pos="0 0 0.021" material="stage_mat"/>
 
-    <!-- 대략적인 정면 카메라 (뷰어에서 자유 카메라로 전환해도 됨) -->
-    <camera name="frontcam" pos="2.9 -1.9 1.5" xyaxes="0.54 0.84 0 -0.12 -0.08 0.99" fovy="42"/>
+    <!-- 정면 카메라: 상반신 + 든 깃발 클로즈업 (뷰어에서 자유 카메라로 전환해도 됨) -->
+    <camera name="frontcam" pos="3.05 0.99 1.62" xyaxes="-0.309 0.951 0 -0.05 -0.016 0.999" fovy="45"/>
 
     <!-- ==================== 골반 (자유 관절) ==================== -->
     <body name="pelvis" pos="0 0 0.93">

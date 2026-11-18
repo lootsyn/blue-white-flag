@@ -44,9 +44,51 @@ def main():
     ok_snap = t_snap is not None and t_snap < 0.65
     print(f"   스냅: {'PASS' if ok_snap else 'FAIL'}")
 
-    print("=== 3. 전체 명령 시퀀스 ===")
+    print("=== 3. 기본 게스처 검증: 올렸다가 자동으로 내려오기 ===")
+    while robot.busy() > 0:   # 스냅 테스트의 게스처가 완전히 끝나도록
+        robot.step()
+    robot.command("blue", "up")
+    while robot.busy() > 0:
+        robot.step()
+    robot.run_for(0.3)
+    up = robot.flags_up()
+    phase = robot.arm_phases()
+    print(f"   게스처 완료 후: 청기 올림={up['blue']}  phase={phase['r']}  pitch={robot.pelvis_tilt_deg[0]:+.2f}°")
+    ok_gesture = (not up["blue"]) and phase["r"] == "idle"
+    print(f"   올렸다→자동 복귀: {'PASS' if ok_gesture else 'FAIL'}")
+
+    print("=== 3.5 번복 검증: 올라가는 도중에 '내려' ===")
+    robot.command("blue", "up")
+    robot.run_for(0.45)  # 팔이 거의 다 올라간 순간
+    mid = robot.flags_up()["blue"]
+    robot.command("blue", "down")  # 번복!
+    while robot.busy() > 0:
+        robot.step()
+    robot.run_for(0.3)
+    up = robot.flags_up()
+    print(f"   중간(0.30s)에 올라가는 중={mid} → 번복 후 올림={up['blue']}  phase={robot.arm_phases()['r']}")
+    ok_reversal = (not up["blue"]) and robot.arm_phases()["r"] == "idle"
+    print(f"   즉시 번복: {'PASS' if ok_reversal else 'FAIL'}")
+
+    print("=== 3.7 정지 검증: '올리지 마'로 그 자리 얼기 ===")
+    robot.command("blue", "up")
+    robot.run_for(0.25)
+    robot.freeze("blue")
+    frozen_pos = robot.data.qpos[robot._jadr["r_shoulder_pitch"]]
+    robot.run_for(0.8)
+    after_pos = robot.data.qpos[robot._jadr["r_shoulder_pitch"]]
+    phase = robot.arm_phases()
+    print(f"   정지 후 phase={phase['r']}  위치 유지={abs(after_pos - frozen_pos) < 0.15} "
+          f"({frozen_pos:.2f}→{after_pos:.2f})")
+    ok_freeze = phase["r"] == "frozen" and abs(after_pos - frozen_pos) < 0.15
+    robot.command("blue", "down")  # 다음 테스트를 위해 풀기
+    while robot.busy() > 0:
+        robot.step()
+    print(f"   그 자리 얼어붙기: {'PASS' if ok_freeze else 'FAIL'}")
+
+    print("=== 4. 전체 명령 시퀀스 ===")
     seq = [
-        ("white", "up"), ("blue", "down"), ("both", "up"),
+        ("white", "up"), ("blue", "up"), ("both", "up"),
         ("blue", "down"), ("white", "down"), ("both", "up"), ("both", "down"),
     ]
     peak_tilt = 0.0
@@ -62,7 +104,7 @@ def main():
         phi, psi = robot.pelvis_tilt_deg
         print(f"   {flag:>5} {direction:>4}: pitch={phi:+5.2f}°  z={robot.data.qpos[2]:.3f}")
 
-    print("=== 4. 최종 상태 ===")
+    print("=== 5. 최종 상태 ===")
     robot.run_for(2.0)
     phi, psi = robot.pelvis_tilt_deg
     z = robot.data.qpos[2]
@@ -73,12 +115,12 @@ def main():
     print(f"   균형 유지: {'PASS' if ok_balance else 'FAIL'}")
 
     ok_nan = bool(np.all(np.isfinite(robot.data.qpos)) and np.all(np.isfinite(robot.data.qvel)))
-    print(f"=== 5. 수치 안정성: {'PASS' if ok_nan else 'FAIL'} ===")
+    print(f"=== 6. 수치 안정성: {'PASS' if ok_nan else 'FAIL'} ===")
 
-    print("=== 6. 오프스크린 렌더 시도 ===")
+    print("=== 7. 오프스크린 렌더 시도 ===")
     try_render()
 
-    passed = ok_stand and ok_snap and ok_balance and ok_nan
+    passed = ok_stand and ok_snap and ok_gesture and ok_reversal and ok_freeze and ok_balance and ok_nan
     print("\n" + ("🎉 전체 PASS" if passed else "❌ FAIL — 튜닝 필요"))
     return 0 if passed else 1
 
