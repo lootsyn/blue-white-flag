@@ -241,13 +241,22 @@ def parse_with_jev(text: str, cfg: dict) -> dict | None:
         if white_conf < _JEV_MIN_CONF:
             white = "hold"
 
+        # 언급된 깃발만 동작/정지 대상으로. 언급되지 않은 깃발은 건드리지 않는다
+        # → "백기 올리지 마"는 백기만 정지, 청기는 진행 중이던 동작을 마저 끝낸다.
+        mentions_blue = bool(re.search(r"청|파란|파랑|블루", text))
+        mentions_white = bool(re.search(r"백|흰|하얀|화이트", text))
         actions = []
         if blue in ("up", "down"):
             actions.append({"flag": "blue", "dir": blue})
+        elif blue == "hold" and mentions_blue:
+            actions.append({"flag": "blue", "dir": "hold"})
         if white in ("up", "down"):
             actions.append({"flag": "white", "dir": white})
+        elif white == "hold" and mentions_white:
+            actions.append({"flag": "white", "dir": "hold"})
         reply = _jev_reply(text, blue, white, True)
         unknown = False
+        # 깃발을 특정하지 않은 유효 명령 ("손 대지 마", "가만히") → 전체 정지
         hold_all = not actions
         return {"reply": reply, "actions": actions, "unknown": unknown,
                 "hold_all": hold_all}
@@ -504,8 +513,8 @@ if __name__ == "__main__":
     p = CommandParser()
     print("엔진:", p.describe())
     for cmd in [
-        "청기 올려", "백기 내려", "청기 올리지 마", "손 대지 마", "가만히 있어",
+        "청기 올려", "백기 내려", "청기 올리지 마", "백기 올리지 마", "손 대지 마", "가만히 있어",
         "청기 올려 놓고 백기 내려", "청기백기 올려", "다 내려",
-        "백기 내리지 말고 청기만 올려", "배고파",
+        "백기 내리지 말고 청기만 올려", "청기 올려 놓고 백기 올리지 마", "배고파",
     ]:
         print(f"{cmd!r:34s} → {json.dumps(p.parse(cmd), ensure_ascii=False)}")
