@@ -81,6 +81,7 @@ SYSTEM_PROMPT = """너는 '청기백기' 게임 로봇의 명령 해석기다. �
 규칙:
 - "올려/올리/들어/올라" → up, "내려/내리" → down
 - 부정 명령("올리지 마", "내리지 마", "하지 마", "손 대지 마", "가만히", "멈춰") → 깃발을 언급했으면 그 깃발 dir="hold", 언급 안 했으면 actions=[] 에 unknown=false (로봇이 가만히 있음)
+- "A 올리기보다/A 올리기보단/A 하지 말고/A 말고 B" → A는 '기각된 대안'이라 절대 수행하지 않는다 (A의 dir="hold")
 - "청기백기", "양손", "둘 다", "다", "모두" → flag="both"
 - 한 문장에 여러 명령이면 actions에 순서대로 나열
 - 도저히 알아들을 수 없는 말이면 unknown=true, actions=[]
@@ -89,6 +90,8 @@ SYSTEM_PROMPT = """너는 '청기백기' 게임 로봇의 명령 해석기다. �
 "청기 올려" → {"reply":"청기 올려!","actions":[{"flag":"blue","dir":"up"}],"unknown":false}
 "백기 내리지 마" → {"reply":"백기는 그대로!","actions":[{"flag":"white","dir":"hold"}],"unknown":false}
 "청기 올려 놓고 백기 내려" → {"reply":"청기 올리고, 백기 내려!","actions":[{"flag":"blue","dir":"up"},{"flag":"white","dir":"down"}],"unknown":false}
+"청기 올리기보단 백기 올리지 마" → {"reply":"아무것도 안 올려요!","actions":[{"flag":"blue","dir":"hold"},{"flag":"white","dir":"hold"}],"unknown":false}
+"백기 말고 청기 올려" → {"reply":"청기 올려, 백기는 그대로!","actions":[{"flag":"blue","dir":"up"},{"flag":"white","dir":"hold"}],"unknown":false}
 "손 대지 마" → {"reply":"안 움직여요!","actions":[],"unknown":false}
 "피자 먹고 싶다" → {"reply":"그건 깃발 명령이 아니잖아요?!","actions":[],"unknown":true}"""
 
@@ -229,22 +232,23 @@ def parse_with_jev(text: str, cfg: dict) -> dict | None:
         white_a = answers.get("white_action", {})
         cmd_a = answers.get("is_command", {})
 
-        is_cmd = float(cmd_a.get("noul", 0.0)) >= _JEV_MIN_NOUL
+        noul = float(cmd_a.get("noul", 0.0))
+        is_cmd = noul >= _JEV_MIN_NOUL
         blue = blue_a.get("choice", "hold")
         white = white_a.get("choice", "hold")
         blue_conf = float(blue_a.get("confidence", 1.0))
         white_conf = float(white_a.get("confidence", 1.0))
+        meta = {"min_conf": min(blue_conf, white_conf), "noul": noul}
 
         if not is_cmd:
             return {"reply": _jev_reply(text, "hold", "hold", False),
-                    "actions": [], "unknown": True}
+                    "actions": [], "unknown": True, "_jev_meta": meta}
 
         # confidence 낮으면 안전하게 hold (로봇이 헛동작하지 않게)
         if blue_conf < _JEV_MIN_CONF:
             blue = "hold"
         if white_conf < _JEV_MIN_CONF:
             white = "hold"
-
         # 언급된 깃발만 동작/정지 대상으로. 언급되지 않은 깃발은 건드리지 않는다
         # → "백기 올리지 마"는 백기만 정지, 청기는 진행 중이던 동작을 마저 끝낸다.
         mentions_blue = bool(re.search(r"청|파란|파랑|블루", text))
@@ -263,7 +267,7 @@ def parse_with_jev(text: str, cfg: dict) -> dict | None:
         # 깃발을 특정하지 않은 유효 명령 ("손 대지 마", "가만히") → 전체 정지
         hold_all = not actions
         return {"reply": reply, "actions": actions, "unknown": unknown,
-                "hold_all": hold_all}
+                "hold_all": hold_all, "_jev_meta": meta}
     except Exception as e:
         print(f"   ⚠️ jev 호출 실패({type(e).__name__}: {e}) → 폴백 엔진으로 전환")
         return None
@@ -450,6 +454,21 @@ def parse_offline(text: str) -> dict:
 # 통합 파서
 # ----------------------------------------------------------------------------
 
+# 하이브리드 정책: jev가 확신하면 그대로 쓰고(0.2s 패스트패스),
+# 애매하면(신뢰도 낮음 / 유효명령 판정이 애매) 대형 챗 LLM에 재판 요청.
+# → 새로운 문형이 나와도 규칙을 추가할 필요 없이 큰 모델이 잡아준다.
+JEV_CONF_FAST = 0.80          # 팔 동작 확신 임계값 (이상이면 패스트패스)
+JEV_NOUL_AMBIG = (0.35, 0.65) # is_command noul이 이 구간이면 '애매'로 보고 재판
+
+
+def _jev_is_ambiguous(meta: dict | None) -> bool:
+    if not meta:
+        return False
+    if meta.get("min_conf", 1.0) < JEV_CONF_FAST:
+        return True
+    lo, hi = JEV_NOUL_AMBIG
+    return lo < meta.get("noul", 0.0) < hi
+
 
 class CommandParser:
     def __init__(self, engine: str = "auto", model: str | None = None):
@@ -477,8 +496,11 @@ class CommandParser:
     def describe(self) -> str:
         eng = self.active_engine
         if eng == "jev":
-            return (f"jev (TypeSafe System One) ✅  endpoint={self.jev_cfg['base_url']}  "
+            base = (f"jev (TypeSafe System One) ✅  endpoint={self.jev_cfg['base_url']}  "
                     f"model={self.jev_cfg['model']}")
+            if self.engine_mode == "auto" and opencode_available():
+                base += "  — 확신 시 즉시, 애매한 문장은 대형 LLM(opencode)에 자동 재판"
+            return base
         if eng == "opencode":
             m = self.opencode_model or os.environ.get("OPENCODE_MODEL", DEFAULT_OPENCODE_MODEL)
             return f"opencode CLI ✅  model={m} (API 키 불필요)"
@@ -490,9 +512,18 @@ class CommandParser:
         used = eng
         if eng == "jev":
             result = parse_with_jev(text, self.jev_cfg)
-            if result is None:
-                used = "opencode" if opencode_available() else "offline"
-                result = parse_with_opencode(text, self.opencode_model) if used == "opencode" else None
+            if result is not None:
+                meta = result.pop("_jev_meta", None)
+                # jev가 애매해하면 → 대형 챗 LLM에 재판 (새 문형을 코딩 없이 소화)
+                if (self.engine_mode == "auto" and _jev_is_ambiguous(meta)
+                        and opencode_available()):
+                    second = parse_with_opencode(text, self.opencode_model)
+                    if second is not None:
+                        result = second
+                        used = "opencode"
+            elif opencode_available():
+                used = "opencode"
+                result = parse_with_opencode(text, self.opencode_model)
         elif eng == "opencode":
             result = parse_with_opencode(text, self.opencode_model)
             if result is None:
@@ -535,5 +566,6 @@ if __name__ == "__main__":
         "청기 올려 놓고 백기 내려", "청기백기 올려", "다 내려",
         "백기 내리지 말고 청기만 올려", "청기 올려 놓고 백기 올리지 마", "배고파",
         "청기 올리기보단 백기 올리지마", "청기 올리기보다 백기 올려", "백기 말고 청기 올려",
+        "청기 올리긴 뭐 올려, 백기나 내려", "백기 들지 말고 청기를 들지",
     ]:
-        print(f"{cmd!r:34s} → {json.dumps(p.parse(cmd), ensure_ascii=False)}")
+        print(f"{cmd!r:36s} → {json.dumps(p.parse(cmd), ensure_ascii=False)}")
